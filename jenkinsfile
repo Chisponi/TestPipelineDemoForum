@@ -1,0 +1,56 @@
+try {
+   timeout(time: 20, unit: 'MINUTES') {
+      def appName="Demo-DTP"
+      def project=""
+
+      node {
+        stage("Initialize") {
+          project = env.PROJECT_NAME
+        }
+      }
+
+      node("maven") {
+        stage("Checkout") {
+          git url: "", branch: "master"
+        }
+        stage("Build WAR") {
+          sh "mvn clean package -Popenshift"
+          stash name:"war", includes:"target/ROOT.war"
+        }
+      }
+
+      node {
+        stage("Build Image") {
+          unstash name:"war"
+          sh "oc start-build ${appName}-docker --from-file=target/ROOT.war -n ${project}"
+          openshiftVerifyBuild bldCfg: "${appName}-docker", namespace: project, waitTime: '20', waitUnit: 'min'
+        }
+        stage("Deploy and Verify in Dev") {
+          openshiftDeploy deploymentConfig: appName, namespace: 'dev'
+          openshiftVerifyDeployment authToken: '', depCfg: appName, namespace: '', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'false', waitTime: ''
+          openshiftVerifyService apiURL: 'https://openshift.default.svc.cluster.local', authToken: '', namespace: 'dev', svcName: appName, verbose: 'false'
+          
+          openshiftTag alias: 'false', srcStream: appName, destStream: appName, namespace: 'dev', destinationNamespace: 'test', srcTag: 'latest', destTag: 'testready', verbose: 'false'
+        }
+        stage("Deploy and Verify in Test"){
+          openshiftDeploy deploymentConfig: appName, namespace: 'test'
+          openshiftVerifyDeployment authToken: '', depCfg: appName, namespace: '', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'false', waitTime: ''
+          openshiftVerifyService apiURL: 'https://openshift.default.svc.cluster.local', authToken: '', namespace: 'test', svcName: appName, verbose: 'false'
+          
+          openshiftTag alias: 'false', srcStream: appName, destStream: appName, namespace: 'test', destinationNamespace: 'prod', srcTag: 'testready', destTag: 'prodready', verbose: 'false'
+        }
+        stage ('Deploy and Verify in Prod'){
+          input 'Ready to deploy in Prod?'
+          openshiftDeploy deploymentConfig: appName, namespace: 'prod'
+          openshiftDeploy apiURL: 'https://openshift.default.svc.cluster.local', authToken: '', depCfg: appName, namespace: 'prod', verbose: 'false', waitTime: ''
+          openshiftVerifyDeployment apiURL: 'https://openshift.default.svc.cluster.local', authToken: '', depCfg: appName, namespace: 'prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'false', waitTime: '10'
+          sleep 10
+        }
+      }
+   }
+} catch (err) {
+   echo "in catch block"
+   echo "Caught: ${err}"
+   currentBuild.result = 'FAILURE'
+   throw err
+}
