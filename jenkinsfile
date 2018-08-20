@@ -9,10 +9,10 @@ try {
         }
       }
 
-      node("maven") {
-        stage("Checkout") {
-          git url: "", branch: "master"
-        }
+//      node("maven") {
+//        stage("Checkout") {
+//        git url: "", branch: "master"
+//        } 
         stage("Build WAR") {
           sh "mvn clean package -Popenshift"
           stash name:"war", includes:"target/ROOT.war"
